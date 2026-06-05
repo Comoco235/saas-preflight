@@ -1,9 +1,21 @@
-# saas-preflight
+<p align="center">
+  <img src="assets/banner.png" alt="saas-preflight" width="100%">
+</p>
 
-**The pre-ship audit for SaaS that takes money. It finds the billing and data-isolation holes the generic scanners miss, on the Next.js + Supabase + Stripe stack.**
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-3FB950" alt="License MIT">
+  <img src="https://img.shields.io/badge/works%20with-Claude%20Code-8957e5" alt="Works with Claude Code">
+  <img src="https://img.shields.io/badge/format-SKILL.md-1f6feb" alt="SKILL.md format">
+  <img src="https://img.shields.io/badge/scope-defensive%20only-238636" alt="Defensive only">
+</p>
+
+<p align="center"><b>The pre-ship audit for SaaS that takes money.</b><br>
+It finds the billing and data-isolation holes the generic scanners miss, on the Next.js + Supabase + Stripe stack.</p>
+
+---
 
 You vibe-coded a SaaS. It charges with Stripe and stores user data in Supabase.
-Two questions you cannot currently answer:
+Two questions you cannot answer right now:
 
 1. Can a stranger read another user's data?
 2. Can a stranger get your paid plan for free?
@@ -21,6 +33,19 @@ bugs and fixed them the hard way.
 
 It is **defensive only.** It finds weaknesses in your own code so you can close
 them. It writes no exploits and touches nothing you do not own.
+
+<!--
+SCREENSHOT SLOT. Once you have run the audit on a real project (dogfood),
+save the report screenshot to assets/report-example.png, then DELETE these
+comment markers so the section below renders. A real screenshot here is the
+single biggest trust signal on this page.
+
+## See it in action
+
+<p align="center">
+  <img src="assets/report-example.png" alt="saas-preflight audit report" width="85%">
+</p>
+-->
 
 ## What it checks
 
@@ -47,6 +72,10 @@ Every finding comes back as P0 (ship blocker), P1 (fix this week), P2
 A fast grep scanner surfaces candidates in seconds. Then the agent verifies each
 one by reading the actual code, because grep cannot prove a vulnerability. You
 get leads turned into confirmed findings, not a wall of false positives.
+
+On a machine without bash (plain Windows, no Git Bash or WSL), the scanner step
+is skipped and the agent does the triage by reading the code itself. The audit
+is never blocked.
 
 ## Install
 
