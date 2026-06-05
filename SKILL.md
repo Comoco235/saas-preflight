@@ -1,3 +1,4 @@
+$content = @'
 ---
 name: saas-preflight
 description: >-
@@ -47,8 +48,10 @@ through all seven; do not stop at the first scary thing.
 
 ## Workflow
 
-Follow this order. Do not skip the scan, and do not report a grep hit as a
-confirmed vulnerability without reading the actual code first.
+Follow this order. The scanner is an optional accelerator, not a gate: if it
+cannot run on this machine, do the triage by reading the code yourself and
+continue. Never report a grep hit as a confirmed vulnerability without reading
+the actual code first.
 
 ### 1. Scope the repo
 
@@ -59,17 +62,31 @@ whether there are server actions, route handlers, or both. If the stack is not
 Next.js + Supabase + Stripe, say so plainly and adapt: the 7 lenses still apply,
 but the specific patterns in the reference files may not match.
 
-### 2. Run the scanner
+### 2. Run the scanner (optional fast first pass)
 
-Run the deterministic scanner to get candidate flags fast:
+The scanner gives candidate flags in seconds. It is a convenience, not a
+requirement. The full audit comes from reading the code against the 7 lenses, so
+if the script does not run on this machine, do not stop: go to step 3 and do the
+triage yourself by reading the code.
+
+Run it like this:
 
 ```bash
 bash scripts/scan.sh <path-to-repo>
 ```
 
-It prints candidate findings grouped by lens. **Treat every line as a lead, not
-a verdict.** Grep cannot prove a vulnerability and will both miss real issues
-and flag safe code. Its job is to point your reading.
+On Windows it runs through Git Bash (bundled with Git for Windows) or WSL, with
+a Windows-style path, for example `bash scripts/scan.sh C:/Users/me/my-app`. If
+no bash is available or the script errors, say so in one line and proceed
+without it. The audit is never blocked by a missing scanner.
+
+When it does run, it prints candidate findings grouped by lens. Treat every line
+as a lead, not a verdict. Grep cannot prove a vulnerability and will both miss
+real issues and flag safe code. Its job is to point your reading.
+
+If you skip the scanner, your step 3 reading must cover all 7 lenses from
+scratch rather than starting from flags. Use the reference files as your
+checklist so nothing is missed.
 
 ### 3. Verify against the reference files
 
@@ -122,3 +139,5 @@ than guessing silently.
 * If a whole lens is clean, say so in one line. Clean lenses build trust.
 * Never invent a finding to pad the report. If the repo is solid, say it is
   solid and stop.
+'@
+[System.IO.File]::WriteAllText("$PWD\SKILL.md", $content)
