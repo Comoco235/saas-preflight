@@ -56,7 +56,10 @@ How to verify:
   server-side from Stripe (`stripe.checkout.sessions.retrieve`) and checking
   `payment_status === 'paid'` before granting.
 * The user's plan stored in your database is updated only from these trusted
-  paths, never from a client request body that says `{ plan: 'pro' }`.
+  paths, never from a client request body that says `{ plan: 'pro' }`. The
+  general form of this bug (a write that takes the raw body and lets the user set
+  `plan`, `role`, `is_pro`, or `credits`) is covered in auth-and-isolation.md,
+  Mass assignment.
 
 ## 4. Checkout and guest-checkout races
 

@@ -10,6 +10,7 @@ Contents:
 2. Middleware fail-open
 3. Supabase row level security (RLS)
 4. Object ownership (IDOR)
+5. Mass assignment (privileged and plan fields)
 
 ## 1. Server-side auth on every protected route and action
 
@@ -58,6 +59,11 @@ or authenticated key can read and write every row, no matter how clean the app
 code looks. You cannot confirm RLS from the app code alone. You must check the
 database.
 
+The scanner lists tables created in the repo's SQL that have no matching
+`enable row level security`. Treat that list as a lead, not a verdict: repo
+migrations are often a partial subset of the live database, and RLS may have been
+enabled directly in the Supabase dashboard. Confirm each one in the dashboard.
+
 How to verify:
 * Look for migration files or `supabase/` SQL that runs
   `alter table X enable row level security` for every table holding user data.
@@ -94,3 +100,31 @@ Fixed shape: `select * from invoices where id = :id and user_id = :currentUser`,
 or rely on an RLS policy `auth.uid() = user_id`, and return 404 (not 403) when
 nothing matches, so you do not confirm the row exists to someone who should not
 see it.
+
+## 5. Mass assignment (privileged and plan fields)
+
+A close cousin of IDOR, on the write path: the app takes an object straight from
+the request and writes it to the database, so the user controls *which columns*
+get set, not just which row. If the table has a `role`, `is_admin`, `is_pro`,
+`plan`, `tier`, or `credits` column, a body like `{ "name": "x", "is_pro": true }`
+quietly grants what should be paid or privileged. This is the general form of the
+"free subscription" bug: the same hole that a forged success redirect opens, but
+through an ordinary write.
+
+Vulnerable shapes:
+* `.update(body)` / `.insert(body)` / `.upsert(data)` where the argument is the
+  raw parsed request, or `.insert({ ...body })` spreading it into the row.
+* An ORM `create`/`update` handed the whole input object.
+
+How to verify, for every write built from request data:
+* The columns written are an explicit allow-list the server controls: pick
+  `{ name, bio }` out of the input and write only those, never the raw body.
+* Privilege and billing columns (`role`, `is_pro`, `plan`, `credits`, ...) are
+  not writable from a user request at all. They change only through trusted
+  server paths: the Stripe webhook for `plan`, an admin-only action for `role`.
+* Where possible, a column-level grant or an RLS `with check` policy refuses the
+  write to those columns even if the app code slips, so it is defense in depth.
+
+This is both an authz failure (privilege escalation) and an input-validation
+failure (see abuse-validation-config.md, Input validation). For the billing case
+specifically, see payments.md, Source of truth for access.

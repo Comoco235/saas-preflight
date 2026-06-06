@@ -61,6 +61,38 @@ run "middleware present" \
     "Read middleware for fail-open: a try/catch that returns next() on error lets a broken auth check pass everyone through. Check the matcher covers protected paths." \
     "NextResponse\.next|export (async )?function middleware"
 
+# RLS coverage. Reads repo SQL only; the Supabase dashboard is the real source of
+# truth (RLS can be enabled there and not in repo migrations), so this is a lead.
+check "RLS coverage on tables created in repo SQL" \
+      "RLS is the real data boundary in Supabase. A table created without 'enable row level security' is open to the anon/authenticated key UNLESS RLS was set in the dashboard. Confirm every MISSING table below has RLS enabled in the Supabase dashboard."
+sql_files="$(
+  if command -v rg >/dev/null 2>&1; then
+    rg -l -S -g '!node_modules' -g '!.next' -g '*.sql' 'create table' "$ROOT" 2>/dev/null
+  else
+    grep -rliE --exclude-dir=node_modules --exclude-dir=.next --include='*.sql' 'create table' "$ROOT" 2>/dev/null
+  fi
+)"
+if [ -z "$sql_files" ]; then
+  printf '  (no .sql with CREATE TABLE found) RLS cannot be verified from code.\n'
+  printf '  Confirm every user-data table has RLS enabled in the Supabase dashboard.\n'
+else
+  all_sql="$(printf '%s\n' "$sql_files" | while IFS= read -r f; do [ -f "$f" ] && cat "$f"; done | tr 'A-Z' 'a-z')"
+  created="$(printf '%s' "$all_sql" | grep -oE 'create table[[:space:]]+(if not exists[[:space:]]+)?(public\.)?[a-z0-9_]+' | sed -E 's/.*[[:space:]]//; s/^public\.//' | sort -u)"
+  rls_on="$(printf '%s' "$all_sql" | grep -oE 'alter table[[:space:]]+(public\.)?[a-z0-9_]+[[:space:]]+enable row level security' | sed -E 's/^alter table[[:space:]]+//; s/[[:space:]]+enable.*//; s/^public\.//' | sort -u)"
+  missing="$(comm -23 <(printf '%s\n' "$created") <(printf '%s\n' "$rls_on") | sed '/^$/d')"
+  if [ -z "$missing" ]; then
+    printf '  OK: every CREATE TABLE in repo SQL has a matching ENABLE ROW LEVEL SECURITY.\n'
+  else
+    printf '%s\n' "$missing" | while IFS= read -r t; do
+      [ -n "$t" ] && printf '  MISSING %s (no ENABLE ROW LEVEL SECURITY in repo SQL; confirm in dashboard)\n' "$t"
+    done
+  fi
+fi
+
+run "mass assignment: a client object written straight to the DB" \
+    "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(data)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." \
+    "\.(insert|update|upsert)\([[:space:]{]*(\.\.\.|body|data|input|payload|values|json|parsed|req\.body)"
+
 run "queries with no obvious owner filter" \
     "A .from(...).select() with no .eq('user_id', ...) or equivalent leaks rows if RLS is also missing. Verify RLS on the table." \
     "\.from\("
