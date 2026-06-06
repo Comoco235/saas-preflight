@@ -135,23 +135,36 @@ specifically, see payments.md, Source of truth for access.
 
 When auth rides on a cookie the browser sends automatically, a third-party site
 can make the user's browser fire a state-changing request and the cookie comes
-along for the ride. That is CSRF. Next.js Server Actions get a built-in
-same-origin check, so they are largely covered. Plain route handlers
-(`app/api/.../route.ts`) do not: a `POST`/`PUT`/`PATCH`/`DELETE` handler that
-mutates based only on the session cookie is exposed.
+along for the ride. That is CSRF. Two distinctions narrow the real surface, and
+the scanner encodes both so it does not flag every mutating route:
 
-How to verify, for every mutating route handler that authenticates by cookie:
-* It confirms the request is same-origin: compare the `Origin` (or
-  `Sec-Fetch-Site`) header against your own host and reject cross-site requests,
-  OR
-* It requires an anti-CSRF token that a cross-site caller cannot read, OR
-* The mutation goes through a Server Action instead, which Next protects.
+* **Route handler vs Server Action.** Next.js Server Actions get a built-in
+  same-origin check, so they are covered. Plain route handlers
+  (`app/api/**/route.ts`, `pages/api/**`) do not: a `POST`/`PUT`/`PATCH`/`DELETE`
+  handler that mutates is on its own. Files marked `'use server'` are excluded.
+* **Cookie vs Bearer.** CSRF needs an ambient credential the browser sends by
+  itself. A handler authenticated by the session cookie (a Supabase server client
+  built on `cookies()` / `createServerClient`, or a `getUser`/`getSession` off
+  it) is exposed. One authenticated by an `Authorization: Bearer` token or an API
+  key is not, because the browser does not attach those headers cross-site, so it
+  is excluded.
 
-Bearer-token APIs (an `Authorization` header, not a cookie) are not CSRF-exposed
-the same way, because the browser does not attach the token automatically.
-Confirm the auth is actually header-based before waving it through. And a `GET`
-handler should be side-effect free: a `GET` that mutates is both a CSRF and a
-caching hazard.
+So the scanner reports a file EXPOSED only when all of these hold: it is an
+`app/api` or `pages/api` route handler, it exports a mutating method, it
+authenticates by the session cookie, and it has no Origin/Referer check and no
+CSRF token in the file. It is a lead, not a verdict: a same-origin check enforced
+centrally (in `middleware.ts`) or a token injected by a shared wrapper will not
+be visible in the handler itself, so confirm by reading before acting.
+
+The fix, any one of:
+* Verify the request is same-origin server-side: compare the `Origin` (or
+  `Referer` / `Sec-Fetch-Site`) header against your own host and reject
+  cross-site requests.
+* Require an anti-CSRF token that a cross-site caller cannot read.
+* Move the mutation to a Server Action, which Next protects.
+
+And a `GET` handler should be side-effect free: a `GET` that mutates is both a
+CSRF and a caching hazard.
 
 ## 7. Open redirect after auth
 

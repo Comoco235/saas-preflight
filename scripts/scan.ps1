@@ -118,9 +118,29 @@ Invoke-Run "Supabase Storage usage" `
   "A public bucket exposes every user's files to anyone with the URL, and uploads with no size/type limit are a cost and abuse vector. Confirm buckets holding user data are private, that storage.objects has owner-scoped RLS, and that uploads are bounded." `
   'createBucket|storage\.from\(|\.upload\(|public:\s*true'
 
-Invoke-Run "route handlers that mutate (CSRF)" `
-  "POST/PUT/PATCH/DELETE route handlers that act on the session cookie are CSRF-exposed: Server Actions get Next's same-origin check, plain route handlers do not. Confirm an Origin/Sec-Fetch-Site check or a CSRF token, or route mutations through Server Actions." `
-  'export\s+(async\s+)?function\s+(POST|PUT|PATCH|DELETE)|export\s+const\s+(POST|PUT|PATCH|DELETE)'
+# File-level negative check: a mutating API route handler that authenticates by
+# the session cookie and has no Origin/Referer check or CSRF token is CSRF-prone.
+# Bearer / API-key handlers and Server Actions are excluded (not CSRF-prone).
+Write-Check "route handlers exposed to CSRF" `
+  "Any file listed EXPOSED is an app/api or pages/api route handler with a mutating method (POST/PUT/PATCH/DELETE), authenticated by the Supabase session cookie, with no Origin/Referer check and no CSRF token. Add a same-origin (Origin/Referer) check or a CSRF token, or move the mutation to a Server Action. A lead: confirm by reading the handler."
+$csrfMethod = 'export\s+(async\s+)?function\s+(POST|PUT|PATCH|DELETE)|export\s+const\s+(POST|PUT|PATCH|DELETE)'
+$csrfPath = '[\\/]app[\\/]api[\\/](.*[\\/])?route\.(ts|tsx|js|jsx|mjs|cjs)$|[\\/]pages[\\/]api[\\/]'
+$csrfServerAction = '[''"]use server[''"]'
+$csrfHeader = 'authorization|bearer|x-api-key|api[_-]?key|apikey'
+$csrfCookie = 'createServerClient|cookies\(|getUser|getSession'
+$csrfProtect = 'get\([''"](origin|referer)|headers\.(origin|referer)|csrf[-_]?token|csrf\('
+$csrfExposed = @($fileData | Where-Object {
+    ($_.Text -cmatch $csrfMethod) -and ($_.Full -match $csrfPath) -and    # mutating method in an API route handler
+    ($_.Text -notmatch $csrfServerAction) -and                            # not a Server Action
+    ($_.Text -notmatch $csrfHeader) -and                                  # not header/bearer auth
+    ($_.Text -match $csrfCookie) -and                                     # cookie-session auth
+    ($_.Text -notmatch $csrfProtect)                                      # no Origin/Referer check or CSRF token
+  })
+if ($csrfExposed.Count -eq 0) {
+  "  (no cookie-auth mutating route handler without an Origin/Referer check)"
+} else {
+  foreach ($fd in $csrfExposed) { "  EXPOSED $($fd.Rel) (cookie-auth mutation, no Origin/Referer check or CSRF token)" }
+}
 
 Invoke-Run "getSession used for a trust decision" `
   "In server code that decides access, prefer getUser (it revalidates the token with Supabase). getSession reads the cookie and can be stale or spoofed in some setups." `

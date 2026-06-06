@@ -97,9 +97,35 @@ run "Supabase Storage usage" \
     "A public bucket exposes every user's files to anyone with the URL, and uploads with no size/type limit are a cost and abuse vector. Confirm buckets holding user data are private, that storage.objects has owner-scoped RLS, and that uploads are bounded." \
     "createBucket|storage\.from\(|\.upload\(|public:[[:space:]]*true"
 
-run "route handlers that mutate (CSRF)" \
-    "POST/PUT/PATCH/DELETE route handlers that act on the session cookie are CSRF-exposed: Server Actions get Next's same-origin check, plain route handlers do not. Confirm an Origin/Sec-Fetch-Site check or a CSRF token, or route mutations through Server Actions." \
-    "export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+(POST|PUT|PATCH|DELETE)|export[[:space:]]+const[[:space:]]+(POST|PUT|PATCH|DELETE)"
+# File-level negative check: a mutating API route handler that authenticates by
+# the session cookie and has no Origin/Referer check or CSRF token is CSRF-prone.
+# Bearer / API-key handlers (the browser does not send those cross-site) and
+# Server Actions (Next applies same-origin protection) are excluded.
+check "route handlers exposed to CSRF" \
+      "Any file listed EXPOSED is an app/api or pages/api route handler with a mutating method (POST/PUT/PATCH/DELETE), authenticated by the Supabase session cookie, with no Origin/Referer check and no CSRF token. Add a same-origin (Origin/Referer) check or a CSRF token, or move the mutation to a Server Action. A lead: confirm by reading the handler."
+csrf_method='export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+(POST|PUT|PATCH|DELETE)|export[[:space:]]+const[[:space:]]+(POST|PUT|PATCH|DELETE)'
+csrf_path='[/\\]app[/\\]api[/\\](.*[/\\])?route\.(ts|tsx|js|jsx|mjs|cjs)$|[/\\]pages[/\\]api[/\\]'
+csrf_candidates="$(
+  if command -v rg >/dev/null 2>&1; then
+    rg -l -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!.git' "$csrf_method" "$ROOT" 2>/dev/null
+  else
+    grep -rlE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build --exclude-dir=.git "$csrf_method" "$ROOT" 2>/dev/null
+  fi
+)"
+csrf_exposed="$(printf '%s\n' "$csrf_candidates" | while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  printf '%s' "$f" | grep -qE "$csrf_path" || continue                                 # API route handler only
+  grep -qE "['\"]use server['\"]" "$f" 2>/dev/null && continue                          # Server Action: Next protects it
+  grep -qiE 'authorization|bearer|x-api-key|api[_-]?key|apikey' "$f" 2>/dev/null && continue   # header/bearer auth: not CSRF-prone
+  grep -qE 'createServerClient|cookies\(|getUser|getSession' "$f" 2>/dev/null || continue       # require cookie-session auth
+  grep -qiE "get\(['\"](origin|referer)|headers\.(origin|referer)|csrf[-_]?token|csrf\(" "$f" 2>/dev/null && continue  # already checks Origin/Referer or uses a CSRF token
+  printf '%s\n' "$f"
+done)"
+if [ -z "$csrf_exposed" ]; then
+  printf '  (no cookie-auth mutating route handler without an Origin/Referer check)\n'
+else
+  printf '%s\n' "$csrf_exposed" | sed 's|^|  EXPOSED |; s|$| (cookie-auth mutation, no Origin/Referer check or CSRF token)|'
+fi
 
 run "getSession used for a trust decision" \
     "In server code that decides access, prefer getUser (it revalidates the token with Supabase). getSession reads the cookie and can be stale or spoofed in some setups." \
