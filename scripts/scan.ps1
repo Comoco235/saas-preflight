@@ -22,7 +22,7 @@ $rootFull = (Resolve-Path -LiteralPath $Root).Path
 
 # Collect source/config files, pruning heavy dirs so we never walk node_modules.
 $excludeDir = @('node_modules', '.next', '.git', 'dist', 'build', 'coverage', 'out')
-$includeExt = '\.(ts|tsx|js|jsx|mjs|cjs|sql|json|prisma|graphql|svelte|vue|astro|env|ya?ml|toml|sh|bash|ps1|md|mdx|txt|html|css|scss)$'
+$includeExt = '\.(ts|tsx|js|jsx|mjs|cjs|sql|json|prisma|graphql|svelte|vue|astro|env|ya?ml|toml|sh|bash|ps1|html|css|scss)$'
 
 function Get-SourceFiles([string]$base) {
   $entries = Get-ChildItem -LiteralPath $base -Force -ErrorAction SilentlyContinue
@@ -111,8 +111,8 @@ if (-not $sqlData) {
 }
 
 Invoke-Run "mass assignment: a client object written straight to the DB" `
-  "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(data)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." `
-  '\.(insert|update|upsert)\([\s{]*(\.\.\.|body|data|input|payload|values|json|parsed|req\.body)'
+  "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(req.body)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." `
+  '\.(insert|update|upsert)\([\s{]*(\.\.\.|body|req\.body|payload|parsed|formData)'
 
 Invoke-Run "Supabase Storage usage" `
   "A public bucket exposes every user's files to anyone with the URL, and uploads with no size/type limit are a cost and abuse vector. Confirm buckets holding user data are private, that storage.objects has owner-scoped RLS, and that uploads are bounded." `

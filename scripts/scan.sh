@@ -21,11 +21,11 @@ fi
 
 # Prefer ripgrep, fall back to grep -r. Both skip node_modules and build dirs.
 if command -v rg >/dev/null 2>&1; then
-  SEARCH() { rg -n --no-heading -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!*.lock' "$@" "$ROOT" 2>/dev/null; }
+  SEARCH() { rg -n --no-heading -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!.git' -g '!*.lock' -g '!*.md' -g '!*.mdx' -g '!*.txt' "$@" "$ROOT" 2>/dev/null; }
 else
   SEARCH() {
     # last arg is the pattern when called as SEARCH "pattern"; emulate rg -n -S
-    grep -rniE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build "$1" "$ROOT" 2>/dev/null
+    grep -rniE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build --exclude-dir=.git --exclude=*.md --exclude=*.mdx --exclude=*.txt "$1" "$ROOT" 2>/dev/null
   }
 fi
 
@@ -67,9 +67,9 @@ check "RLS coverage on tables created in repo SQL" \
       "RLS is the real data boundary in Supabase. A table created without 'enable row level security' is open to the anon/authenticated key UNLESS RLS was set in the dashboard. Confirm every MISSING table below has RLS enabled in the Supabase dashboard."
 sql_files="$(
   if command -v rg >/dev/null 2>&1; then
-    rg -l -S -g '!node_modules' -g '!.next' -g '*.sql' 'create table' "$ROOT" 2>/dev/null
+    rg -l -S -g '!node_modules' -g '!.next' -g '!.git' -g '*.sql' 'create table' "$ROOT" 2>/dev/null
   else
-    grep -rliE --exclude-dir=node_modules --exclude-dir=.next --include='*.sql' 'create table' "$ROOT" 2>/dev/null
+    grep -rliE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git --include='*.sql' 'create table' "$ROOT" 2>/dev/null
   fi
 )"
 if [ -z "$sql_files" ]; then
@@ -90,8 +90,8 @@ else
 fi
 
 run "mass assignment: a client object written straight to the DB" \
-    "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(data)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." \
-    "\.(insert|update|upsert)\([[:space:]{]*(\.\.\.|body|data|input|payload|values|json|parsed|req\.body)"
+    "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(req.body)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." \
+    "\.(insert|update|upsert)\([[:space:]{]*(\.\.\.|body|req\.body|payload|parsed|formData)"
 
 run "Supabase Storage usage" \
     "A public bucket exposes every user's files to anyone with the URL, and uploads with no size/type limit are a cost and abuse vector. Confirm buckets holding user data are private, that storage.objects has owner-scoped RLS, and that uploads are bounded." \
@@ -111,9 +111,9 @@ check "queries with no obvious owner filter" \
       "Any file listed MISSING uses .from(...) but shows no user_id / auth.uid() / .eq() filter in the same file. If RLS is also missing on that table, it leaks rows."
 from_files="$(
   if command -v rg >/dev/null 2>&1; then
-    rg -l -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' '\.from\(' "$ROOT" 2>/dev/null
+    rg -l -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!.git' -g '!*.md' -g '!*.mdx' -g '!*.txt' '\.from\(' "$ROOT" 2>/dev/null
   else
-    grep -rlE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build '\.from\(' "$ROOT" 2>/dev/null
+    grep -rlE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build --exclude-dir=.git --exclude=*.md --exclude=*.mdx --exclude=*.txt '\.from\(' "$ROOT" 2>/dev/null
   fi
 )"
 if [ -z "$from_files" ]; then
@@ -141,9 +141,9 @@ check "webhook handler missing signature verification" \
       "Any file below is a likely Stripe webhook handler. If it is listed as MISSING, it never calls constructEvent and a forged 'paid' event can unlock paid features for free. P0."
 webhook_files="$(
   if command -v rg >/dev/null 2>&1; then
-    rg -l -S -g '!node_modules' -g '!.next' 'stripe-signature|checkout\.session\.completed|invoice\.paid|customer\.subscription' "$ROOT" 2>/dev/null
+    rg -l -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!.git' -g '!*.lock' -g '!*.md' -g '!*.mdx' -g '!*.txt' 'stripe-signature|checkout\.session\.completed|invoice\.paid|customer\.subscription' "$ROOT" 2>/dev/null
   else
-    grep -rliE --exclude-dir=node_modules --exclude-dir=.next 'stripe-signature|checkout\.session\.completed|invoice\.paid|customer\.subscription' "$ROOT" 2>/dev/null
+    grep -rliE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build --exclude-dir=.git --exclude=*.md --exclude=*.mdx --exclude=*.txt 'stripe-signature|checkout\.session\.completed|invoice\.paid|customer\.subscription' "$ROOT" 2>/dev/null
   fi
 )"
 if [ -z "$webhook_files" ]; then
