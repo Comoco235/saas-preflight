@@ -34,18 +34,11 @@ bugs and fixed them the hard way.
 It is **defensive only.** It finds weaknesses in your own code so you can close
 them. It writes no exploits and touches nothing you do not own.
 
-<!--
-SCREENSHOT SLOT. Once you have run the audit on a real project (dogfood),
-save the report screenshot to assets/report-example.png, then DELETE these
-comment markers so the section below renders. A real screenshot here is the
-single biggest trust signal on this page.
-
 ## See it in action
 
 <p align="center">
   <img src="assets/report-example.png" alt="saas-preflight audit report" width="85%">
 </p>
--->
 
 ## What it checks
 

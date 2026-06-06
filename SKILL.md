@@ -1,4 +1,3 @@
-$content = @'
 ---
 name: saas-preflight
 description: >-
@@ -139,5 +138,3 @@ than guessing silently.
 * If a whole lens is clean, say so in one line. Clean lenses build trust.
 * Never invent a finding to pad the report. If the repo is solid, say it is
   solid and stop.
-'@
-[System.IO.File]::WriteAllText("$PWD\SKILL.md", $content)

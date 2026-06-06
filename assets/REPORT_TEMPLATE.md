@@ -1,4 +1,4 @@
-# vibe-audit report template
+# saas-preflight report template
 
 ALWAYS produce the report in exactly this structure. Fill the brackets. Drop any
 section that has no content rather than padding it.
