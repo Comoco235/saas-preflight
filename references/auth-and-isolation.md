@@ -11,6 +11,7 @@ Contents:
 3. Supabase row level security (RLS)
 4. Object ownership (IDOR)
 5. Mass assignment (privileged and plan fields)
+6. CSRF on cookie-session route handlers
 
 ## 1. Server-side auth on every protected route and action
 
@@ -128,3 +129,25 @@ How to verify, for every write built from request data:
 This is both an authz failure (privilege escalation) and an input-validation
 failure (see abuse-validation-config.md, Input validation). For the billing case
 specifically, see payments.md, Source of truth for access.
+
+## 6. CSRF on cookie-session route handlers
+
+When auth rides on a cookie the browser sends automatically, a third-party site
+can make the user's browser fire a state-changing request and the cookie comes
+along for the ride. That is CSRF. Next.js Server Actions get a built-in
+same-origin check, so they are largely covered. Plain route handlers
+(`app/api/.../route.ts`) do not: a `POST`/`PUT`/`PATCH`/`DELETE` handler that
+mutates based only on the session cookie is exposed.
+
+How to verify, for every mutating route handler that authenticates by cookie:
+* It confirms the request is same-origin: compare the `Origin` (or
+  `Sec-Fetch-Site`) header against your own host and reject cross-site requests,
+  OR
+* It requires an anti-CSRF token that a cross-site caller cannot read, OR
+* The mutation goes through a Server Action instead, which Next protects.
+
+Bearer-token APIs (an `Authorization` header, not a cookie) are not CSRF-exposed
+the same way, because the browser does not attach the token automatically.
+Confirm the auth is actually header-based before waving it through. And a `GET`
+handler should be side-effect free: a `GET` that mutates is both a CSRF and a
+caching hazard.

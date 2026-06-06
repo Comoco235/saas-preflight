@@ -14,6 +14,7 @@ Contents:
 6. Unbounded cost
 7. Secrets and config drift
 8. CORS
+9. Supabase Storage
 
 ## 1. Input validation
 
@@ -117,3 +118,22 @@ bill from one abusive user overnight.
 `Access-Control-Allow-Origin: *` on an authenticated API lets any website call
 it in the context of a logged-in user's browser. Verify CORS is scoped to your
 own origins on any route that returns user data or performs actions.
+
+## 9. Supabase Storage
+
+Storage is a second data store with its own access rules, and it is easy to leave
+open. The failure modes:
+
+* Public buckets. A bucket created with `public: true` serves every object to
+  anyone with the URL, no auth. Fine for avatars by design, a leak for invoices
+  or private uploads. Confirm buckets holding user data are private and served
+  through signed URLs.
+* Missing storage RLS. Access to private buckets is governed by RLS on
+  `storage.objects`, separately from your own tables. Confirm there are policies
+  that scope objects to their owner, typically by matching the user id to the
+  first path segment (`(storage.foldername(name))[1] = auth.uid()::text`).
+* Unbounded uploads. No size limit is a cost and denial-of-service vector (fill
+  storage, run up egress). No type restriction lets a user upload anything,
+  including content that is dangerous when served back. Confirm a `fileSizeLimit`
+  and `allowedMimeTypes` (or equivalent server-side checks), and that the upload
+  endpoint is itself behind auth and a rate limit (see Unbounded cost).

@@ -93,6 +93,14 @@ run "mass assignment: a client object written straight to the DB" \
     "A write that takes the request body/object directly (.update(body), .insert({ ...body }), .upsert(data)) lets a user set columns they must not control: role, is_pro, plan, credits. Confirm the written fields are an explicit allow-list, not the raw body." \
     "\.(insert|update|upsert)\([[:space:]{]*(\.\.\.|body|data|input|payload|values|json|parsed|req\.body)"
 
+run "Supabase Storage usage" \
+    "A public bucket exposes every user's files to anyone with the URL, and uploads with no size/type limit are a cost and abuse vector. Confirm buckets holding user data are private, that storage.objects has owner-scoped RLS, and that uploads are bounded." \
+    "createBucket|storage\.from\(|\.upload\(|public:[[:space:]]*true"
+
+run "route handlers that mutate (CSRF)" \
+    "POST/PUT/PATCH/DELETE route handlers that act on the session cookie are CSRF-exposed: Server Actions get Next's same-origin check, plain route handlers do not. Confirm an Origin/Sec-Fetch-Site check or a CSRF token, or route mutations through Server Actions." \
+    "export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+(POST|PUT|PATCH|DELETE)|export[[:space:]]+const[[:space:]]+(POST|PUT|PATCH|DELETE)"
+
 run "queries with no obvious owner filter" \
     "A .from(...).select() with no .eq('user_id', ...) or equivalent leaks rows if RLS is also missing. Verify RLS on the table." \
     "\.from\("
