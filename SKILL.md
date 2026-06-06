@@ -74,10 +74,17 @@ Run it like this:
 bash scripts/scan.sh <path-to-repo>
 ```
 
-On Windows it runs through Git Bash (bundled with Git for Windows) or WSL, with
-a Windows-style path, for example `bash scripts/scan.sh C:/Users/me/my-app`. If
-no bash is available or the script errors, say so in one line and proceed
-without it. The audit is never blocked by a missing scanner.
+On Windows, prefer the native PowerShell port, which needs no bash:
+
+```powershell
+powershell -File scripts/scan.ps1 <path-to-repo>
+```
+
+Both are read-only and make no network calls. Git Bash (bundled with Git for
+Windows) or WSL also run the `.sh` version, with a Windows-style path, for
+example `bash scripts/scan.sh C:/Users/me/my-app`. If neither runs or the script
+errors, say so in one line and proceed without it. The audit is never blocked by
+a missing scanner.
 
 When it does run, it prints candidate findings grouped by lens. Treat every line
 as a lead, not a verdict. Grep cannot prove a vulnerability and will both miss
@@ -94,13 +101,14 @@ about to handle real money or real users, read the matching reference and verify
 by reading the actual code:
 
 * `references/auth-and-isolation.md`: Lens 1. Server-side auth on routes and
-  actions, middleware fail-open, Supabase RLS, object ownership (IDOR).
+  actions, middleware fail-open, Supabase RLS, object ownership (IDOR), mass
+  assignment, CSRF on route handlers, open redirect after auth.
 * `references/payments.md`: Lenses 2, 3, partly 4. Stripe webhook signature and
   idempotency, subscription state as source of truth, checkout and guest-checkout
   races, downgrades and refunds.
 * `references/abuse-validation-config.md`: Lenses 5, 6, 7, partly 4. Input
   validation, SSRF, rate limiting, quota races, unbounded cost, secrets and env,
-  CORS, degraded-mode behavior.
+  CORS, Supabase Storage, degraded-mode behavior.
 
 Read a reference only when you reach its lens. This keeps context lean.
 

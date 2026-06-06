@@ -57,6 +57,10 @@ quiet and this one goes deep.
 7. **Abuse / cost**: can an anonymous user drain your LLM or email bill, or
    slip past a freemium quota through a race?
 
+Also flagged: mass-assignment writes (`role`/`is_pro`/`plan` set straight from
+the request body), CSRF on cookie-session route handlers, public Supabase
+Storage buckets, and open redirects after auth.
+
 Every finding comes back as P0 (ship blocker), P1 (fix this week), P2
 (hardening), or P3 (hygiene), with a file, a line, and a concrete fix.
 
@@ -91,6 +95,12 @@ For a quick first look, without an agent:
 
 ```bash
 bash scripts/scan.sh /path/to/your/repo
+```
+
+Or, native on Windows (no bash needed):
+
+```powershell
+powershell -File scripts/scan.ps1 C:/path/to/your/repo
 ```
 
 Read-only. It changes nothing and makes no network calls.
