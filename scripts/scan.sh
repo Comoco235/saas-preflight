@@ -101,9 +101,33 @@ run "route handlers that mutate (CSRF)" \
     "POST/PUT/PATCH/DELETE route handlers that act on the session cookie are CSRF-exposed: Server Actions get Next's same-origin check, plain route handlers do not. Confirm an Origin/Sec-Fetch-Site check or a CSRF token, or route mutations through Server Actions." \
     "export[[:space:]]+(async[[:space:]]+)?function[[:space:]]+(POST|PUT|PATCH|DELETE)|export[[:space:]]+const[[:space:]]+(POST|PUT|PATCH|DELETE)"
 
-run "queries with no obvious owner filter" \
-    "A .from(...).select() with no .eq('user_id', ...) or equivalent leaks rows if RLS is also missing. Verify RLS on the table." \
-    "\.from\("
+run "getSession used for a trust decision" \
+    "In server code that decides access, prefer getUser (it revalidates the token with Supabase). getSession reads the cookie and can be stale or spoofed in some setups." \
+    "getSession"
+
+# File-level negative check: files that use .from(...) but show no owner filter
+# anywhere in the file. A lead to read first; RLS may still cover the table.
+check "queries with no obvious owner filter" \
+      "Any file listed MISSING uses .from(...) but shows no user_id / auth.uid() / .eq() filter in the same file. If RLS is also missing on that table, it leaks rows."
+from_files="$(
+  if command -v rg >/dev/null 2>&1; then
+    rg -l -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' '\.from\(' "$ROOT" 2>/dev/null
+  else
+    grep -rlE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build '\.from\(' "$ROOT" 2>/dev/null
+  fi
+)"
+if [ -z "$from_files" ]; then
+  none
+else
+  from_missing="$(printf '%s\n' "$from_files" | while IFS= read -r f; do
+    [ -f "$f" ] && { grep -qE 'user_id|auth\.uid|\.eq\(' "$f" 2>/dev/null || printf '%s\n' "$f"; }
+  done)"
+  if [ -z "$from_missing" ]; then
+    printf '  (every file using .from also has a user_id/auth.uid/.eq filter)\n'
+  else
+    printf '%s\n' "$from_missing" | sed 's|^|  MISSING |; s|$| (.from used, no owner filter in file)|'
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 section "LENS 2 + 3: ATOMICITY / IDEMPOTENCY (PAYMENTS)"
@@ -147,6 +171,10 @@ run "dangerouslySetInnerHTML" \
 run "outbound fetch with a variable URL" \
     "If the URL comes from user input, this is SSRF: a user can make your server hit internal addresses. Verify the host is allow-listed." \
     "fetch\((req|request|body|params|searchParams|input|url)"
+
+run "open redirect from user input" \
+    "A redirect whose target comes from the request (?next=, ?redirect=, returnTo) lets an attacker bounce a just-authenticated user to a phishing site under your domain's trust. Confirm the target is a relative path or an allow-listed host." \
+    "redirect\([[:space:]]*(req|request|searchParams|params|query|body|url|next|returnTo|callbackUrl|redirectTo)"
 
 run "eval / dynamic exec" \
     "eval and child_process with interpolated input is remote code execution waiting to happen." \

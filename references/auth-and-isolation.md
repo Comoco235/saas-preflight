@@ -12,6 +12,7 @@ Contents:
 4. Object ownership (IDOR)
 5. Mass assignment (privileged and plan fields)
 6. CSRF on cookie-session route handlers
+7. Open redirect after auth
 
 ## 1. Server-side auth on every protected route and action
 
@@ -151,3 +152,21 @@ the same way, because the browser does not attach the token automatically.
 Confirm the auth is actually header-based before waving it through. And a `GET`
 handler should be side-effect free: a `GET` that mutates is both a CSRF and a
 caching hazard.
+
+## 7. Open redirect after auth
+
+Login and confirmation flows often carry a "go here next" parameter (`?next=`,
+`?redirect=`, `returnTo`, `callbackUrl`) and redirect to it after success. If the
+app redirects to whatever that value says, an attacker sends a link to your real,
+trusted login page with `?next=https://evil.example`; the user authenticates on
+your genuine domain, then your app bounces them to the attacker's site. Your
+domain's trust is borrowed for phishing.
+
+How to verify, for every redirect built from request input:
+* The target is a relative path: it starts with a single `/`, not `//` and not a
+  scheme (`https:`, `http:`), OR its host is checked against an allow-list of your
+  own domains.
+* `//evil.example` is rejected. A leading `//` is a protocol-relative URL to
+  another host, the classic bypass of a naive "starts with /" check.
+* The same applies to OAuth and Stripe return URLs that echo a client-supplied
+  destination.
