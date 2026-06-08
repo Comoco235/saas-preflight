@@ -45,6 +45,15 @@ through all seven; do not stop at the first scary thing.
 7. **Abuse / cost**: Can an anonymous user run up the bill (LLM calls, emails,
    storage, compute) or exhaust quotas through races?
 
+Plus one conditional lens, in scope only when the app is multi-tenant or
+white-label:
+
+8. **Tenant isolation (multi-tenant only)**: in a multi-tenant or white-label
+   app, can one tenant reach another tenant's data or session? Covers
+   cross-tenant data scoping, session cookie scope across subdomains, tenant
+   context spoofing, subdomain and domain creation validation, and domain
+   deprovisioning on downgrade. Skipped automatically for single-tenant apps.
+
 ## Workflow
 
 Follow this order. The scanner is an optional accelerator, not a gate: if it
@@ -59,7 +68,10 @@ a `supabase/` directory or `@supabase/*` imports, and `stripe` usage. Note
 whether the app uses the App Router (`app/`) or Pages Router (`pages/`), and
 whether there are server actions, route handlers, or both. If the stack is not
 Next.js + Supabase + Stripe, say so plainly and adapt: the 7 lenses still apply,
-but the specific patterns in the reference files may not match.
+but the specific patterns in the reference files may not match. The scanner also
+detects multi-tenant signals (a tenant or org table, Host or subdomain routing, a
+customer-domains table); Lens 8 (tenant isolation) is only in scope when at least
+one is present, and is skipped otherwise.
 
 ### 2. Run the scanner (optional fast first pass)
 
@@ -88,7 +100,10 @@ a missing scanner.
 
 When it does run, it prints candidate findings grouped by lens. Treat every line
 as a lead, not a verdict. Grep cannot prove a vulnerability and will both miss
-real issues and flag safe code. Its job is to point your reading.
+real issues and flag safe code. Its job is to point your reading. When the app is
+multi-tenant, it also prints a Lens 8 section: session cookie scope, tenant header
+trust, subdomain reserved-name deny-list, and domain lifecycle on downgrade. On a
+single-tenant app it prints one line and emits no Lens 8 findings.
 
 If you skip the scanner, your step 3 reading must cover all 7 lenses from
 scratch rather than starting from flags. Use the reference files as your
@@ -109,6 +124,8 @@ by reading the actual code:
 * `references/abuse-validation-config.md`: Lenses 5, 6, 7, partly 4. Input
   validation, SSRF, rate limiting, quota races, unbounded cost, secrets and env,
   CORS, Supabase Storage, degraded-mode behavior.
+* `references/tenant-isolation.md`: Lens 8, multi-tenant only. Read this only
+  when the app is multi-tenant.
 
 Read a reference only when you reach its lens. This keeps context lean.
 
@@ -135,6 +152,11 @@ as a working exploit.
   P1, or missing defense in depth (no rate limit, no idempotency key yet).
 * **P3: Hygiene.** Secrets in logs, dead config, weak CORS on a non-sensitive
   route, TODOs near auth.
+
+For Lens 8 (tenant isolation): a cross-tenant data read or write, or a session
+shared across tenants, is a P0 (a stranger reaching data that is not theirs). A
+missing domain deprovisioning on downgrade or a missing reserved-name deny-list
+is typically P2.
 
 If you are unsure between two levels, state the assumption that decides it rather
 than guessing silently.

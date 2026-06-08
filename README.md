@@ -42,8 +42,9 @@ them. It writes no exploits and touches nothing you do not own.
 
 ## What it checks
 
-Seven lenses, run in order. The ones in bold are where the generic scanners go
-quiet and this one goes deep.
+Seven lenses, run in order, plus a conditional eighth that runs only for
+multi-tenant apps. The ones in bold are where the generic scanners go quiet and
+this one goes deep.
 
 1. **Auth / authz**: can a logged-in user reach data that is not theirs (IDOR,
    missing server-side checks, middleware that fails open, Supabase RLS off)?
@@ -56,6 +57,11 @@ quiet and this one goes deep.
    broken redirect URLs.
 7. **Abuse / cost**: can an anonymous user drain your LLM or email bill, or
    slip past a freemium quota through a race?
+8. **Tenant isolation (multi-tenant only)**: in a multi-tenant or white-label
+   app, can one tenant reach another tenant's data or session (a session cookie
+   shared across subdomains, a forged tenant header, a custom domain still
+   serving after a downgrade)? Runs only when the scanner detects multi-tenant
+   signals, and is skipped for single-tenant apps.
 
 Also flagged: mass-assignment writes (`role`/`is_pro`/`plan` set straight from
 the request body), CSRF on cookie-session route handlers, public Supabase
