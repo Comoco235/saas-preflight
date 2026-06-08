@@ -234,6 +234,108 @@ Invoke-Run "quota / usage counters" `
   'usage|quota|credits|remaining|count\b'
 
 # ---------------------------------------------------------------------------
+# LENS 8 is conditional: it runs only when the app looks multi-tenant. Otherwise
+# it prints one line and emits no findings, so single-tenant apps see no noise.
+$mtPatterns = @(
+  'org_id|tenant_id|workspace_id',
+  'agency_domains|custom_domains|customDomains|addDomain|removeDomain|resolveTenant|getTenantByHost',
+  'subdomain',
+  'create table\s+(?:if not exists\s+)?(?:public\.)?(?:orgs?|organizations?|tenants?|agenc(?:y|ies)|workspaces?)'
+)
+$multiTenant = $false
+foreach ($p in $mtPatterns) {
+  if ($fileData | Where-Object { $_.Text -match $p }) { $multiTenant = $true; break }
+}
+
+if (-not $multiTenant) {
+  ""
+  "Lens 8 (tenant isolation): single-tenant app, not applicable"
+} else {
+  Write-Section "LENS 8: TENANT ISOLATION (multi-tenant only)"
+
+  # 8.1 session cookie scoped to a parent domain (lead, high signal)
+  Write-Check "8.1 session cookie scoped to a parent domain" `
+    "An auth cookie with a parent (leading-dot) domain attribute is shared across every tenant subdomain, enabling cross-tenant session theft. Each file below sets a cookie and includes a domain attribute. Confirm it is not the auth cookie on a parent domain."
+  $cookieSetter = 'cookies\(\)\.set|cookieStore\.set|cookies\.set|createServerClient|sb-'
+  $domainAttr = 'domain:\s*["''][^"'']*\.[^"'']+["'']'
+  $c81 = New-Object System.Collections.Generic.List[string]
+  foreach ($fd in $fileData) {
+    if ($fd.Text -match $cookieSetter) {
+      for ($i = 0; $i -lt $fd.Lines.Count; $i++) {
+        if ($fd.Lines[$i] -match $domainAttr) {
+          $c81.Add(("  LEAD {0}:{1}:{2} (cookie with a domain attribute; confirm it is not the auth cookie on a parent domain)" -f $fd.Rel, ($i + 1), $fd.Lines[$i].Trim()))
+        }
+      }
+    }
+  }
+  if ($c81.Count -eq 0) { "  cookies appear host-only (OK)" } else { $c81 }
+
+  # 8.2 tenant header trusted from the inbound request (file-level negative)
+  Write-Check "8.2 tenant header trusted from the inbound request" `
+    "A request handler that reads a tenant header from the incoming request without stripping it first lets an attacker forge it and switch tenants. A file is OK only if it unconditionally deletes the inbound tenant header."
+  $thFind = 'x-[a-z0-9-]*tenant|headers\.get\(["''][^"'']*tenant|set\(["'']x-[a-z0-9-]*tenant'
+  $thStrip = '\.delete\(["''][^"'']*tenant|headers\.delete\('
+  $thData = @($fileData | Where-Object { $_.Text -match $thFind })
+  if ($thData.Count -eq 0) {
+    "  (no file references a tenant header)"
+  } else {
+    foreach ($fd in $thData) {
+      if ($fd.Text -match $thStrip) { "  OK      $($fd.Rel) (strips inbound tenant header)" }
+      else { "  MISSING $($fd.Rel) (trusts inbound tenant header, verify it is stripped)" }
+    }
+  }
+
+  # 8.3 subdomain or domain creation without a reserved-name deny-list (lead)
+  Write-Check "8.3 subdomain or domain creation without a reserved-name deny-list" `
+    "A tenant could claim a reserved name (admin, api, www, the brand). A creation path with no reserved-name deny-list in the same file is a lead."
+  $domGuardKw = 'reserved|denylist|deny[_-]?list|blocklist|block[_-]?list'
+  $domGuardArr = '["''](admin|www|api|app|mail|static|assets|root)["''][,\s]+["''](admin|www|api|app|mail|static|assets|root)["'']'
+  $domWrite = '\.(insert|upsert)\('
+  $domTable = 'agency_domains|custom_domains|domains|subdomain'
+  $d83Cand = 0
+  $d83Leads = New-Object System.Collections.Generic.List[string]
+  foreach ($fd in $fileData) {
+    if ($fd.Full.ToLower().EndsWith('.sql')) { continue }
+    if (-not (($fd.Text -match $domWrite) -and ($fd.Text -match $domTable))) { continue }
+    $d83Cand++
+    if (($fd.Text -match $domGuardKw) -or ($fd.Text -match $domGuardArr)) { continue }
+    $d83Leads.Add("  LEAD $($fd.Rel) (subdomain/domain creation with no reserved-name deny-list in file)")
+  }
+  if ($d83Cand -eq 0) {
+    "  (no subdomain or domain creation path found)"
+  } elseif ($d83Leads.Count -eq 0) {
+    "  (subdomain or domain creation paths all have a reserved-name guard)"
+  } else {
+    $d83Leads
+  }
+
+  # 8.4 tenant scoping pointer (agent read, no hard verdict)
+  Write-Check "8.4 tenant scoping (read instruction, no verdict)" `
+    "Tenant-owned tables must scope by the org or tenant key, not by user_id alone. This is confirmed by reading, not by grep."
+  "  Verify every tenant-owned table scopes by the org or tenant key in its RLS policy, not by user_id alone. Confirm by reading the policies, ideally against the live database."
+
+  # 8.5 domain not deprovisioned on downgrade (file-level negative)
+  Write-Check "8.5 domain not deprovisioned on downgrade" `
+    "A cancelled tenant that keeps its custom domain is a paid feature for free and an orphaned domain. A subscription.deleted handler with no domain teardown is MISSING."
+  $subDel = 'customer\.subscription\.deleted|subscription\.deleted'
+  $teardown = 'removeDomain|deprovision|disableDomain|invalidateTenant|agency_domains|custom_domains|status[^=]*disabled|delete[^;]*domain|teardown'
+  $subDelData = @($fileData | Where-Object { $_.Text -match $subDel })
+  if ($subDelData.Count -eq 0) {
+    "  (no subscription.deleted handler found)"
+  } else {
+    foreach ($fd in $subDelData) {
+      if ($fd.Text -match $teardown) { "  OK      $($fd.Rel) (references domain teardown on cancellation)" }
+      else { "  MISSING $($fd.Rel) (subscription cancellation does not deprovision the tenant domain)" }
+    }
+  }
+
+  # 8.6 white-label content (cross-reference to Lens 5, no new grep)
+  Write-Check "8.6 white-label content (cross-reference to Lens 5)" `
+    "Tenant-controlled branding and custom-domain verification overlap Lens 5. No new grep here."
+  "  Tenant-supplied branding (logo, color, HTML) and custom-domain verification are covered by Lens 5: confirm the color is strictly validated, no raw tenant HTML or CSS reaches the page, and custom-domain verification never fetches an attacker-supplied URL (SSRF)."
+}
+
+# ---------------------------------------------------------------------------
 ""
 "========== END =========="
 "Next: open the reference file for each lens with candidates and confirm by reading the code."

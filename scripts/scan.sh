@@ -239,5 +239,116 @@ run "quota / usage counters" \
     "usage|quota|credits|remaining|count\b"
 
 # ---------------------------------------------------------------------------
+# LENS 8 is conditional: it runs only when the app looks multi-tenant. Otherwise
+# it prints one line and emits no findings, so single-tenant apps (the majority)
+# see no noise.
+files_matching() { # files_matching "<pattern>" -> candidate file paths
+  if command -v rg >/dev/null 2>&1; then
+    rg -l -S -g '!node_modules' -g '!.next' -g '!dist' -g '!build' -g '!.git' -g '!*.lock' -g '!*.md' -g '!*.mdx' -g '!*.txt' "$1" "$ROOT" 2>/dev/null
+  else
+    grep -rliE --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=build --exclude-dir=.git --exclude=*.md --exclude=*.mdx --exclude=*.txt "$1" "$ROOT" 2>/dev/null
+  fi
+}
+mt_signal() { [ -n "$(hits "$1")" ]; }
+MULTITENANT=0
+if mt_signal 'org_id|tenant_id|workspace_id' \
+   || mt_signal 'agency_domains|custom_domains|customDomains|addDomain|removeDomain|resolveTenant|getTenantByHost' \
+   || mt_signal 'subdomain' \
+   || mt_signal 'create table[[:space:]]+(if not exists[[:space:]]+)?(public\.)?(orgs?|organizations?|tenants?|agenc(y|ies)|workspaces?)'; then
+  MULTITENANT=1
+fi
+
+if [ "$MULTITENANT" -eq 0 ]; then
+  printf '\nLens 8 (tenant isolation): single-tenant app, not applicable\n'
+else
+  section "LENS 8: TENANT ISOLATION (multi-tenant only)"
+
+  # 8.1 session cookie scoped to a parent domain (lead, high signal)
+  check "8.1 session cookie scoped to a parent domain" \
+        "An auth cookie with a parent (leading-dot) domain attribute is shared across every tenant subdomain, enabling cross-tenant session theft. Each file below sets a cookie and includes a domain attribute. Confirm it is not the auth cookie on a parent domain."
+  c81_files="$(files_matching 'cookies\(\)\.set|cookieStore\.set|cookies\.set|createServerClient|sb-')"
+  c81="$(printf '%s\n' "$c81_files" | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    grep -niE "domain:[[:space:]]*[\"'][^\"']*\.[^\"']+[\"']" "$f" 2>/dev/null | sed "s|^|$f:|"
+  done)"
+  if [ -z "$c81" ]; then
+    printf '  cookies appear host-only (OK)\n'
+  else
+    printf '%s\n' "$c81" | sed 's|^|  LEAD |; s|$| (cookie with a domain attribute; confirm it is not the auth cookie on a parent domain)|'
+  fi
+
+  # 8.2 tenant header trusted from the inbound request (file-level negative)
+  check "8.2 tenant header trusted from the inbound request" \
+        "A request handler that reads a tenant header from the incoming request without stripping it first lets an attacker forge it and switch tenants. A file is OK only if it unconditionally deletes the inbound tenant header."
+  th_files="$(files_matching "x-[a-z0-9-]*tenant|headers\.get\([\"'][^\"']*tenant|set\([\"']x-[a-z0-9-]*tenant")"
+  if [ -z "$th_files" ]; then
+    printf '  (no file references a tenant header)\n'
+  else
+    printf '%s\n' "$th_files" | while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      if grep -qiE "\.delete\([\"'][^\"']*tenant|headers\.delete\(" "$f" 2>/dev/null; then
+        printf '  OK      %s (strips inbound tenant header)\n' "$f"
+      else
+        printf '  MISSING %s (trusts inbound tenant header, verify it is stripped)\n' "$f"
+      fi
+    done
+  fi
+
+  # 8.3 subdomain or domain creation without a reserved-name deny-list (lead)
+  check "8.3 subdomain or domain creation without a reserved-name deny-list" \
+        "A tenant could claim a reserved name (admin, api, www, the brand). A creation path with no reserved-name deny-list in the same file is a lead."
+  dom_files="$(files_matching 'subdomain|agency_domains|custom_domains|domains')"
+  d83="$(printf '%s\n' "$dom_files" | while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    case "$f" in *.sql) continue;; esac
+    # A creation path is an insert/upsert into a domains table or a subdomain write.
+    # We require the write, so the bare word "subdomain" in a comment is not a hit.
+    is_create=0
+    { grep -qiE '\.(insert|upsert)\(' "$f" 2>/dev/null && grep -qiE 'agency_domains|custom_domains|domains|subdomain' "$f" 2>/dev/null; } && is_create=1
+    [ "$is_create" -eq 1 ] || continue
+    printf 'CAND %s\n' "$f"
+    grep -qiE 'reserved|denylist|deny[_-]?list|blocklist|block[_-]?list' "$f" 2>/dev/null && continue
+    grep -qiE "[\"'](admin|www|api|app|mail|static|assets|root)[\"'][,[:space:]]+[\"'](admin|www|api|app|mail|static|assets|root)[\"']" "$f" 2>/dev/null && continue
+    printf 'LEAD %s\n' "$f"
+  done)"
+  cand_count="$(printf '%s\n' "$d83" | grep -c '^CAND ')"
+  leads="$(printf '%s\n' "$d83" | sed -n 's|^LEAD ||p')"
+  if [ "$cand_count" -eq 0 ]; then
+    printf '  (no subdomain or domain creation path found)\n'
+  elif [ -z "$leads" ]; then
+    printf '  (subdomain or domain creation paths all have a reserved-name guard)\n'
+  else
+    printf '%s\n' "$leads" | sed 's|^|  LEAD |; s|$| (subdomain/domain creation with no reserved-name deny-list in file)|'
+  fi
+
+  # 8.4 tenant scoping pointer (agent read, no hard verdict)
+  check "8.4 tenant scoping (read instruction, no verdict)" \
+        "Tenant-owned tables must scope by the org or tenant key, not by user_id alone. This is confirmed by reading, not by grep."
+  printf '  Verify every tenant-owned table scopes by the org or tenant key in its RLS policy, not by user_id alone. Confirm by reading the policies, ideally against the live database.\n'
+
+  # 8.5 domain not deprovisioned on downgrade (file-level negative)
+  check "8.5 domain not deprovisioned on downgrade" \
+        "A cancelled tenant that keeps its custom domain is a paid feature for free and an orphaned domain. A subscription.deleted handler with no domain teardown is MISSING."
+  subdel_files="$(files_matching 'customer\.subscription\.deleted|subscription\.deleted')"
+  if [ -z "$subdel_files" ]; then
+    printf '  (no subscription.deleted handler found)\n'
+  else
+    printf '%s\n' "$subdel_files" | while IFS= read -r f; do
+      [ -f "$f" ] || continue
+      if grep -qiE 'removeDomain|deprovision|disableDomain|invalidateTenant|agency_domains|custom_domains|status[^=]*disabled|delete[^;]*domain|teardown' "$f" 2>/dev/null; then
+        printf '  OK      %s (references domain teardown on cancellation)\n' "$f"
+      else
+        printf '  MISSING %s (subscription cancellation does not deprovision the tenant domain)\n' "$f"
+      fi
+    done
+  fi
+
+  # 8.6 white-label content (cross-reference to Lens 5, no new grep)
+  check "8.6 white-label content (cross-reference to Lens 5)" \
+        "Tenant-controlled branding and custom-domain verification overlap Lens 5. No new grep here."
+  printf '  Tenant-supplied branding (logo, color, HTML) and custom-domain verification are covered by Lens 5: confirm the color is strictly validated, no raw tenant HTML or CSS reaches the page, and custom-domain verification never fetches an attacker-supplied URL (SSRF).\n'
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n========== END ==========\n'
 echo "Next: open the reference file for each lens with candidates and confirm by reading the code."
